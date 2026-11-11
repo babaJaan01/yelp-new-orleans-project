@@ -1,0 +1,377 @@
+---
+title: "Where to Find the Best Breakfast and Coffee in New Orleans"
+subtitle: "Yelp Open Dataset, MATH 167R Project 2 (Steps 1-6)"
+date: last-modified
+format:
+  html:
+    toc: true
+    code-fold: false
+    embed-resources: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Research question
+
+> **Where in New Orleans can someone find the best breakfast and coffee restaurants, and which geographic area is best for finding them?**
+
+"Best" here means a high average Yelp rating *and* enough reviews that the rating can be trusted. Reviewer-adjusted scores (Step 7) are not part of this report yet.
+
+```{r setup}
+library(tidyverse)
+library(sf)
+library(tigris)
+library(scales)
+library(viridis)
+
+options(tigris_use_cache = TRUE)
+dir.create("figures", showWarnings = FALSE)
+theme_set(theme_minimal(base_size = 12))
+```
+
+## Large-data management
+
+The Yelp download is a 4.3 GB zip containing a 6.3 GB tar. The review file alone is 5.3 GB (about 7 million reviews) and the user file is 3.4 GB.
+
+- **Disk:** I extracted only the business and review files from the tar (`tar -xf ... file1 file2`), not the check-in, tip and user files I did not need.
+- **Memory:** Reading all of `yelp_academic_dataset_review.json` into R at once would need many GB of RAM. Instead `R/import.R` uses `jsonlite::stream_in()` with a `handler` that processes 50,000 reviews at a time and keeps only reviews for New Orleans restaurants. R never used more than about 1.2 GB, and the full import took about 6 minutes.
+- **Columns:** only the columns needed for the analysis were kept (the business table drops attributes and hours).
+- **Storage:** the filtered tables are saved as `xz`-compressed RDS files (`business_new_orleans.rds`, 117 KB; `reviews_new_orleans.rds`, 78 MB), after which the raw 10 GB of JSON, tar and zip can be deleted.
+- **Sharing:** the raw files and the reviews RDS (which contains review text) are not committed to GitHub. Running `Rscript R/import.R` recreates them. The final analysis uses the complete set of New Orleans restaurants and all of their reviews, not a sample.
+
+## Step 1-2: Import and filter to New Orleans restaurants
+
+The import code is in [`R/import.R`](R/import.R). A New Orleans restaurant is a Yelp business with `state == "LA"`, `city == "New Orleans"` and the text "Restaurants" in its `categories` field. Step 5 checks this label against an official boundary.
+
+```{r load}
+restaurants <- readRDS("data/new_orleans/business_new_orleans.rds")
+reviews <- readRDS("data/new_orleans/reviews_new_orleans.rds")
+
+tibble(
+  number_of_restaurants = nrow(restaurants),
+  number_of_reviews = nrow(reviews),
+  missing_coordinates = sum(is.na(restaurants$latitude) | is.na(restaurants$longitude)),
+  missing_categories = sum(is.na(restaurants$categories))
+)
+```
+
+## Step 3: Choose related categories
+
+```{r categories}
+restaurant_categories <- restaurants |>
+  select(business_id, categories) |>
+  separate_longer_delim(categories, delim = ",") |>
+  transmute(business_id, category = str_to_lower(str_squish(categories)))
+
+category_counts <- restaurant_categories |>
+  filter(!category %in% c("restaurants", "food")) |>
+  count(category, sort = TRUE)
+
+selected_categories <- c("breakfast & brunch", "coffee & tea", "cafes", "bakeries")
+
+category_counts |>
+  slice_head(n = 25) |>
+  mutate(selected = category %in% selected_categories) |>
+  ggplot(aes(n, fct_reorder(category, n), fill = selected)) +
+  geom_col() +
+  scale_fill_manual(values = c(`TRUE` = "#c2410c", `FALSE` = "grey70"), guide = "none") +
+  labs(
+    title = "The 25 most common categories among New Orleans restaurants",
+    subtitle = "Selected breakfast and coffee categories highlighted",
+    x = "Restaurants", y = NULL
+  )
+ggsave("figures/category_counts.png", width = 8, height = 6, dpi = 150, bg = "white")
+```
+
+I selected **breakfast & brunch, coffee & tea, cafes and bakeries**. They describe the same occasion: a morning meal or a coffee and pastry stop. I did not simply take the most common categories, since nightlife, bars and cajun/creole say nothing about mornings. To check that these categories belong together, I looked at which categories most often share a business with "breakfast & brunch", and at the overlap between the selected categories.
+
+```{r cooccurrence}
+anchor <- restaurant_categories |>
+  filter(category == "breakfast & brunch") |>
+  distinct(business_id)
+
+restaurant_categories |>
+  semi_join(anchor, by = "business_id") |>
+  filter(!category %in% c("restaurants", "food", "breakfast & brunch")) |>
+  count(category, sort = TRUE, name = "shared_with_breakfast") |>
+  slice_head(n = 12) |>
+  knitr::kable(caption = "Categories that most often co-occur with Breakfast & Brunch")
+
+selected_long <- restaurant_categories |>
+  filter(category %in% selected_categories) |>
+  distinct(business_id, category)
+
+inner_join(selected_long, selected_long, by = "business_id", relationship = "many-to-many") |>
+  filter(category.x < category.y) |>
+  count(category.x, category.y, name = "restaurants_in_both") |>
+  arrange(desc(restaurants_in_both)) |>
+  knitr::kable(caption = "Overlap between the selected categories")
+```
+
+Coffee & tea (85 restaurants), cafes (65) and bakeries (32) are all among the categories that most often appear alongside "breakfast & brunch". The remaining common partners (sandwiches, American food, bars) are general restaurant types, not morning-specific, so I left them out. The four selected categories also overlap heavily with each other (for example 85 restaurants are both breakfast & brunch and coffee & tea), which supports treating them as one morning-food group.
+
+**Inclusion rule:** a restaurant is included if it belongs to **at least one** of the four selected categories.
+
+```{r selected}
+selected_ids <- selected_long |> distinct(business_id)
+
+selected_restaurants <- restaurants |>
+  semi_join(selected_ids, by = "business_id") |>
+  mutate(business_name = str_squish(name))
+
+selected_reviews <- reviews |>
+  semi_join(selected_restaurants, by = "business_id")
+
+tibble(
+  qualifying_restaurants = nrow(selected_restaurants),
+  reviews_for_these_restaurants = nrow(selected_reviews)
+)
+```
+
+## Step 4: Join businesses to reviews
+
+Reviews were filtered to the selected restaurants *before* any joining (the `semi_join` above), so only reviews for relevant businesses are carried forward. The two tables share `business_id` (one restaurant, many reviews). The reviewer-level work comes in Step 7.
+
+```{r reviews-per-restaurant}
+selected_reviews |>
+  count(business_id, name = "reviews_in_data") |>
+  summarise(
+    restaurants_with_reviews = n(),
+    median_reviews = median(reviews_in_data),
+    max_reviews = max(reviews_in_data)
+  )
+```
+
+## Step 5: Add an official boundary with a spatial join
+
+The Yelp `city` field is just a text label. I downloaded the Census place boundaries for Louisiana and tested which restaurant points actually fall inside the New Orleans boundary.
+
+```{r places}
+louisiana_places <- places(state = "LA", cb = TRUE, year = 2024) |>
+  st_transform(4326)
+
+restaurant_points <- selected_restaurants |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE)
+
+restaurants_with_place <- restaurant_points |>
+  st_join(louisiana_places |> select(place_name = NAME), join = st_within, left = TRUE)
+
+restaurants_with_place |>
+  st_drop_geometry() |>
+  count(city, place_name, sort = TRUE) |>
+  knitr::kable(caption = "Yelp city label vs. Census place containing the point")
+```
+
+```{r mismatches}
+mismatches <- restaurants_with_place |>
+  st_drop_geometry() |>
+  filter(is.na(place_name) | place_name != "New Orleans") |>
+  select(business_name, address, postal_code, place_name)
+
+mismatches |> knitr::kable(caption = "Restaurants labelled New Orleans by Yelp but outside the city boundary")
+```
+
+All 11 mismatches are in neighboring Jefferson Parish communities (Metairie, Harahan, Kenner, Elmwood, Terrytown and Jefferson). They are labelled "New Orleans" by Yelp, most likely because of their postal address (several have 70121, 70123 or 70056 ZIPs that span the parish line). They are not typos, so I did not "fix" them. For the main analysis I keep only restaurants *inside* the official New Orleans boundary, so the question stays about the city and not its suburbs. One restaurant (Le Petit Bistro) has no street address and a point that falls in Kenner despite a 70115 ZIP, so its coordinates look wrong.
+
+```{r in-city}
+new_orleans_boundary <- louisiana_places |> filter(NAME == "New Orleans")
+
+in_city <- restaurants_with_place |> filter(place_name == "New Orleans")
+
+tibble(
+  yelp_label_new_orleans = nrow(restaurants_with_place),
+  inside_official_boundary = nrow(in_city),
+  excluded = nrow(restaurants_with_place) - nrow(in_city)
+)
+
+ggplot() +
+  geom_sf(data = new_orleans_boundary, fill = "grey95", color = "grey35") +
+  geom_sf(data = in_city, aes(color = stars), alpha = 0.7, size = 1.4) +
+  scale_color_viridis_c(option = "C", limits = c(1, 5)) +
+  labs(title = "Breakfast and coffee restaurants inside New Orleans", color = "Business\nstars")
+ggsave("figures/restaurants_in_new_orleans.png", width = 8, height = 6, dpi = 150, bg = "white")
+```
+
+## Step 6: Compare and choose a geographic system
+
+I compared two Census geographies:
+
+- **ZIP Code Tabulation Areas (ZCTAs):** postal-style areas that most readers recognise.
+- **Census tracts (Orleans Parish):** statistical areas of roughly 1,200-8,000 people.
+
+I did not use Neighborhood Statistical Areas or wards. Both are available from Data.NOLA.gov but I limited this comparison to systems available directly through `tigris`.
+
+```{r geographies}
+zcta <- zctas(year = 2020) |>
+  st_transform(4326) |>
+  select(area = ZCTA5CE20)
+
+tracts_orleans <- tracts("LA", county = "Orleans", cb = TRUE, year = 2023) |>
+  st_transform(4326) |>
+  select(area = GEOID)
+
+assign_area <- function(points, boundaries) {
+  points |>
+    st_join(boundaries, join = st_within, left = TRUE) |>
+    st_drop_geometry()
+}
+
+by_zcta <- assign_area(in_city, zcta)
+by_tract <- assign_area(in_city, tracts_orleans)
+
+area_summary <- function(df) {
+  df |>
+    filter(!is.na(area)) |>
+    group_by(area) |>
+    summarise(
+      restaurants = n(),
+      avg_stars = mean(stars),
+      median_stars = median(stars),
+      total_yelp_reviews = sum(review_count),
+      established = sum(review_count >= 20),
+      avg_stars_established = if_else(
+        established > 0, mean(stars[review_count >= 20]), NA_real_
+      ),
+      .groups = "drop"
+    )
+}
+
+zcta_summary <- area_summary(by_zcta)
+tract_summary <- area_summary(by_tract)
+
+geo_comparison <- tibble(
+  `Geographic system` = c("ZIP/ZCTA", "Census tract"),
+  `Areas with a restaurant` = c(nrow(zcta_summary), nrow(tract_summary)),
+  `Restaurants assigned` = c(sum(zcta_summary$restaurants), sum(tract_summary$restaurants)),
+  `Unmatched restaurants` = c(sum(is.na(by_zcta$area)), sum(is.na(by_tract$area))),
+  `Smallest area count` = c(min(zcta_summary$restaurants), min(tract_summary$restaurants)),
+  `Median area count` = c(median(zcta_summary$restaurants), median(tract_summary$restaurants)),
+  `Largest area count` = c(max(zcta_summary$restaurants), max(tract_summary$restaurants)),
+  `Areas with fewer than 5` = c(sum(zcta_summary$restaurants < 5), sum(tract_summary$restaurants < 5))
+)
+
+knitr::kable(geo_comparison, caption = "Comparison of geographic systems (restaurants inside New Orleans)")
+```
+
+```{r geo-maps, fig.width=11, fig.height=6}
+# zoom to where the restaurants are; the official city boundary includes miles of marsh and water
+focus <- st_bbox(in_city) + c(-0.01, -0.01, 0.01, 0.01)
+
+make_map <- function(boundaries, summary, title) {
+  boundaries |>
+    inner_join(summary, by = "area") |>
+    ggplot() +
+    geom_sf(aes(fill = restaurants), color = "white", linewidth = 0.2) +
+    scale_fill_viridis_c(option = "C", trans = "sqrt") +
+    coord_sf(xlim = focus[c("xmin", "xmax")], ylim = focus[c("ymin", "ymax")]) +
+    labs(title = title, fill = "Restaurants")
+}
+
+p_zcta <- make_map(zcta, zcta_summary, "ZIP code areas")
+p_tract <- make_map(tracts_orleans, tract_summary, "Census tracts")
+
+gridExtra_ok <- requireNamespace("patchwork", quietly = TRUE)
+if (gridExtra_ok) {
+  patchwork::wrap_plots(p_zcta, p_tract, nrow = 1)
+} else {
+  print(p_zcta); print(p_tract)
+}
+ggsave("figures/geography_comparison_counts.png", width = 11, height = 6, dpi = 150, bg = "white")
+```
+
+```{r zcta-table}
+zcta_summary |>
+  arrange(desc(restaurants)) |>
+  mutate(across(c(avg_stars, median_stars, avg_stars_established), \(x) round(x, 2))) |>
+  knitr::kable(caption = "Breakfast and coffee restaurants by ZIP code area")
+```
+
+### Which area is best?
+
+An area is only fairly comparable if it has several restaurants with enough reviews to trust. I rank areas by the average stars of **established restaurants (at least 20 Yelp reviews)**, and only count areas with at least 5 established restaurants.
+
+```{r area-ranking}
+min_established <- 5
+
+best_areas <- zcta_summary |>
+  filter(established >= min_established) |>
+  arrange(desc(avg_stars_established)) |>
+  select(ZIP = area, restaurants, established, avg_stars_established, total_yelp_reviews)
+
+best_areas |>
+  mutate(avg_stars_established = round(avg_stars_established, 2)) |>
+  knitr::kable(caption = "ZIP areas ranked by average stars of established restaurants (5+ established restaurants required)")
+```
+
+```{r best-area-map, fig.width=8, fig.height=6}
+zcta |>
+  inner_join(zcta_summary, by = "area") |>
+  mutate(rankable = established >= min_established) |>
+  ggplot() +
+  geom_sf(aes(fill = avg_stars_established, alpha = rankable), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(option = "C", na.value = "grey85") +
+  scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.35), guide = "none") +
+  coord_sf(xlim = focus[c("xmin", "xmax")], ylim = focus[c("ymin", "ymax")]) +
+  labs(
+    title = "Average stars of established breakfast and coffee restaurants",
+    subtitle = "Faded ZIPs have fewer than 5 established restaurants",
+    fill = "Avg stars"
+  )
+ggsave("figures/zip_ratings_map.png", width = 8, height = 6, dpi = 150, bg = "white")
+```
+
+### Preliminary top 10 restaurants
+
+These use raw Yelp stars among restaurants with at least 20 reviews. Reviewer-adjusted scores (Step 7) may reorder them.
+
+```{r top10, fig.width=8, fig.height=6}
+top10 <- by_zcta |>
+  filter(review_count >= 20) |>
+  arrange(desc(stars), desc(review_count)) |>
+  slice_head(n = 10)
+
+top10 |>
+  select(business_name, ZIP = area, stars, review_count, categories) |>
+  knitr::kable(caption = "Preliminary top 10 breakfast and coffee restaurants (raw stars, 20+ reviews)")
+
+ggplot() +
+  geom_sf(data = zcta |> filter(area %in% zcta_summary$area), fill = "grey96", color = "grey60") +
+  geom_sf(data = new_orleans_boundary, fill = NA, color = "grey20", linewidth = 0.6) +
+  geom_sf(data = in_city |> semi_join(top10, by = "business_id"), color = "#c2410c", size = 3) +
+  ggrepel::geom_label_repel(
+    data = in_city |> semi_join(top10, by = "business_id") |>
+      mutate(label = str_trunc(business_name, 22), x = longitude, y = latitude) |>
+      st_drop_geometry(),
+    aes(x = x, y = y, label = label), size = 2.6, max.overlaps = Inf
+  ) +
+  coord_sf(xlim = focus[c("xmin", "xmax")], ylim = focus[c("ymin", "ymax")]) +
+  labs(title = "Preliminary top 10 breakfast and coffee restaurants", subtitle = "ZIP boundaries shown in grey")
+ggsave("figures/top10_map.png", width = 8, height = 6, dpi = 150, bg = "white")
+```
+
+### Decision
+
+**Geographic system: ZIP code areas (ZCTAs).**
+
+- **Enough restaurants per area.** The restaurants fall into 18 ZIP areas (median 14 restaurants per area, only 3 areas with fewer than 5) but 103 census tracts (median 2 per tract, 75 tracts with fewer than 5). Tract averages would rest on one or two restaurants, so they are too noisy to rank.
+- **No unmatched points.** Both systems assign every restaurant inside the city, so matching was not a deciding factor.
+- **Understandable to readers.** People looking for a place to eat already think in ZIP codes; tract numbers mean nothing to most readers.
+- **What ZIPs hide.** ZIP areas are postal units, not neighborhoods, and the large ZIP (70130, the CBD/Warehouse District area) mixes very different blocks. The tract map shows that the restaurants in a ZIP are often concentrated in one corner of it.
+
+**Which area is best?** Two ZIPs lead on average stars among established restaurants.
+
+- **70113** (Central City / Garden District area, approximate) has the highest average, 4.28, but only 9 established restaurants.
+- **70117** (Bywater / Marigny / St. Roch area) is close behind at 4.15 with 33 established restaurants out of 40 breakfast and coffee places, and 7,253 Yelp reviews.
+
+Because 70117's average rests on more than three times as many established restaurants, I consider it the **best area for finding breakfast and coffee**, with 70113 a strong but thinner runner-up. The French Quarter/CBD ZIP, 70130, has by far the most choices (146 restaurants, about 77,000 Yelp reviews) but an average of only 3.85, so it is best for variety rather than for quality. ZIP names above are approximate.
+
+The preliminary top 10 are all 5-star restaurants with at least 20 reviews, ordered by review count. Ties at 5.0 stars are common, which is one reason Step 7 adds a reviewer-adjusted score and the reliability checks.
+
+### Limitations
+
+- Yelp ratings come from self-selected reviewers, and reviewers differ in how generously they score. Step 7 adjusts for this.
+- The Yelp dataset is a snapshot, so closed restaurants and changed ratings are not reflected.
+- ZIP areas and tracts are different sizes; neither is an official neighborhood. Neighborhood Statistical Areas and wards from Data.NOLA.gov were not tested.
