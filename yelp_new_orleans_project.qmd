@@ -1,6 +1,6 @@
 ---
 title: "Where to Find the Best Breakfast and Coffee in New Orleans"
-subtitle: "Yelp Open Dataset, MATH 167R Project 2 (Steps 1-6)"
+subtitle: "Yelp Open Dataset, MATH 167R Project 2 (Steps 1-7)"
 date: last-modified
 format:
   html:
@@ -8,6 +8,7 @@ format:
     code-fold: false
     embed-resources: true
     theme: cosmo
+    css: docs-style.css
 execute:
   echo: true
   warning: false
@@ -18,7 +19,7 @@ execute:
 
 > **Where in New Orleans can someone find the best breakfast and coffee restaurants, and which geographic area is best for finding them?**
 
-"Best" here means a high average Yelp rating *and* enough reviews that the rating can be trusted. Reviewer-adjusted scores (Step 7) are not part of this report yet.
+"Best" here means a high average Yelp rating *and* enough reviews that the rating can be trusted. I also adjust ratings for each reviewer's usual scoring habits (Step 7).
 
 ```{r setup}
 library(tidyverse)
@@ -323,35 +324,6 @@ zcta |>
 ggsave("figures/zip_ratings_map.png", width = 8, height = 6, dpi = 150, bg = "white")
 ```
 
-### Preliminary top 10 restaurants
-
-These use raw Yelp stars among restaurants with at least 20 reviews. Reviewer-adjusted scores (Step 7) may reorder them.
-
-```{r top10, fig.width=8, fig.height=6}
-top10 <- by_zcta |>
-  filter(review_count >= 20) |>
-  arrange(desc(stars), desc(review_count)) |>
-  slice_head(n = 10)
-
-top10 |>
-  select(business_name, ZIP = area, stars, review_count, categories) |>
-  knitr::kable(caption = "Preliminary top 10 breakfast and coffee restaurants (raw stars, 20+ reviews)")
-
-ggplot() +
-  geom_sf(data = zcta |> filter(area %in% zcta_summary$area), fill = "grey96", color = "grey60") +
-  geom_sf(data = new_orleans_boundary, fill = NA, color = "grey20", linewidth = 0.6) +
-  geom_sf(data = in_city |> semi_join(top10, by = "business_id"), color = "#c2410c", size = 3) +
-  ggrepel::geom_label_repel(
-    data = in_city |> semi_join(top10, by = "business_id") |>
-      mutate(label = str_trunc(business_name, 22), x = longitude, y = latitude) |>
-      st_drop_geometry(),
-    aes(x = x, y = y, label = label), size = 2.6, max.overlaps = Inf
-  ) +
-  coord_sf(xlim = focus[c("xmin", "xmax")], ylim = focus[c("ymin", "ymax")]) +
-  labs(title = "Preliminary top 10 breakfast and coffee restaurants", subtitle = "ZIP boundaries shown in grey")
-ggsave("figures/top10_map.png", width = 8, height = 6, dpi = 150, bg = "white")
-```
-
 ### Decision
 
 **Geographic system: ZIP code areas (ZCTAs).**
@@ -368,10 +340,249 @@ ggsave("figures/top10_map.png", width = 8, height = 6, dpi = 150, bg = "white")
 
 Because 70117's average rests on more than three times as many established restaurants, I consider it the **best area for finding breakfast and coffee**, with 70113 a strong but thinner runner-up. The French Quarter/CBD ZIP, 70130, has by far the most choices (146 restaurants, about 77,000 Yelp reviews) but an average of only 3.85, so it is best for variety rather than for quality. ZIP names above are approximate.
 
-The preliminary top 10 are all 5-star restaurants with at least 20 reviews, ordered by review count. Ties at 5.0 stars are common, which is one reason Step 7 adds a reviewer-adjusted score and the reliability checks.
 
-### Limitations
+## Step 7: Raw ratings vs. reviewer-adjusted scores
 
-- Yelp ratings come from self-selected reviewers, and reviewers differ in how generously they score. Step 7 adjusts for this.
+Some reviewers give nearly everything five stars and others rarely do. To account for that I compare each rating with the reviewer's own usual rating.
+
+- **Reviewers with enough history:** reviewers with at least **5 reviews** of the breakfast and coffee restaurants inside New Orleans.
+- **Baseline:** each reviewer's **mean** star rating across those restaurants. I chose the mean over the median because star ratings are whole numbers, so a median is too coarse (it is almost always 4 or 5).
+- **Normalized score:** the rating minus the reviewer's mean. A reviewer who averages 5 and gives 5 stars scores 0; one who averages 3 and gives 4 stars scores +1. This is not a new Yelp rating; it only says whether a review was above or below that reviewer's usual.
+
+```{r step7-data}
+city_ids <- in_city$business_id
+
+category_reviews <- selected_reviews |>
+  filter(business_id %in% city_ids)
+
+reviewer_baselines <- category_reviews |>
+  group_by(user_id) |>
+  summarise(
+    reviewer_mean = mean(stars),
+    reviewer_review_count = n(),
+    .groups = "drop"
+  )
+
+adjusted_reviews <- function(min_reviews) {
+  category_reviews |>
+    inner_join(
+      reviewer_baselines |> filter(reviewer_review_count >= min_reviews),
+      by = "user_id"
+    ) |>
+    mutate(normalized_score = stars - reviewer_mean)
+}
+
+eligible_reviews <- adjusted_reviews(5)
+
+tibble(
+  all_reviews = nrow(category_reviews),
+  all_reviewers = nrow(reviewer_baselines),
+  eligible_reviewers = n_distinct(eligible_reviews$user_id),
+  share_of_reviewers = percent(n_distinct(eligible_reviews$user_id) / nrow(reviewer_baselines), 0.1),
+  eligible_reviews = nrow(eligible_reviews),
+  share_of_reviews = percent(nrow(eligible_reviews) / nrow(category_reviews), 0.1)
+) |>
+  knitr::kable(caption = "Reviewers with at least 5 reviews")
+```
+
+```{r restaurant-summary}
+min_eligible <- 20
+
+restaurant_summary <- in_city |>
+  st_drop_geometry() |>
+  select(business_id, business_name, yelp_stars = stars) |>
+  left_join(by_zcta |> select(business_id, area), by = "business_id") |>
+  left_join(
+    category_reviews |>
+      group_by(business_id) |>
+      summarise(
+        reviews_all = n(),
+        avg_stars_all = mean(stars),
+        .groups = "drop"
+      ),
+    by = "business_id"
+  ) |>
+  left_join(
+    eligible_reviews |>
+      group_by(business_id) |>
+      summarise(
+        reviews_eligible = n(),
+        avg_stars_eligible = mean(stars),
+        avg_normalized = mean(normalized_score),
+        .groups = "drop"
+      ),
+    by = "business_id"
+  )
+
+ranked <- restaurant_summary |>
+  filter(reviews_eligible >= min_eligible) |>
+  mutate(
+    rank_raw = rank(-avg_stars_all, ties.method = "min"),
+    rank_adjusted = rank(-avg_normalized, ties.method = "min"),
+    rank_change = rank_raw - rank_adjusted
+  )
+
+tibble(
+  restaurants_in_city = nrow(restaurant_summary),
+  with_20_plus_eligible_reviews = nrow(ranked),
+  rank_correlation_raw_vs_adjusted = round(cor(ranked$avg_stars_all, ranked$avg_normalized, method = "spearman"), 2)
+) |>
+  knitr::kable(caption = "Restaurants ranked (20+ eligible reviews)")
+```
+
+### Does the threshold matter?
+
+```{r threshold}
+top10_at <- function(min_reviews) {
+  adjusted_reviews(min_reviews) |>
+    group_by(business_id) |>
+    summarise(n = n(), adj = mean(normalized_score), .groups = "drop") |>
+    filter(n >= min_eligible) |>
+    slice_max(adj, n = 10, with_ties = FALSE) |>
+    pull(business_id)
+}
+
+top10_base <- top10_at(5)
+
+map_dfr(c(3, 5, 10), \(k) {
+  r <- adjusted_reviews(k)
+  tibble(
+    `Minimum reviews per reviewer` = k,
+    `Reviewers kept` = n_distinct(r$user_id),
+    `Share of all reviews` = percent(nrow(r) / nrow(category_reviews), 0.1),
+    `Restaurants with 20+ eligible reviews` = r |> count(business_id) |> filter(n >= min_eligible) |> nrow(),
+    `Top-10 overlap with the 5-review top 10` = length(intersect(top10_at(k), top10_base))
+  )
+}) |>
+  knitr::kable(caption = "Changing the reviewer threshold")
+```
+
+### Which restaurants move most?
+
+```{r movers}
+ranked |>
+  arrange(desc(avg_normalized)) |>
+  slice_head(n = 10) |>
+  transmute(
+    Restaurant = business_name, ZIP = area,
+    `Raw avg stars` = round(avg_stars_all, 2),
+    `Adjusted score` = round(avg_normalized, 2),
+    `Eligible reviews` = reviews_eligible,
+    `Raw rank` = rank_raw, `Adjusted rank` = rank_adjusted
+  ) |>
+  knitr::kable(caption = "Top 10 by reviewer-adjusted score (20+ eligible reviews)")
+
+bind_rows(
+  ranked |> slice_max(rank_change, n = 5, with_ties = FALSE),
+  ranked |> slice_min(rank_change, n = 5, with_ties = FALSE)
+) |>
+  transmute(
+    Restaurant = business_name, ZIP = area,
+    `Raw avg stars` = round(avg_stars_all, 2),
+    `Adjusted score` = round(avg_normalized, 2),
+    `Raw rank` = rank_raw, `Adjusted rank` = rank_adjusted,
+    `Places gained` = rank_change
+  ) |>
+  knitr::kable(caption = "Largest rank changes after adjustment (positive = moved up)")
+```
+
+```{r scatter, fig.width=8, fig.height=6}
+top10 <- ranked |> slice_max(avg_normalized, n = 10, with_ties = FALSE)
+
+ggplot(ranked, aes(avg_stars_all, avg_normalized)) +
+  geom_hline(yintercept = 0, color = "grey70") +
+  geom_point(aes(size = reviews_all), alpha = 0.55, color = "grey40") +
+  geom_point(data = top10, aes(size = reviews_all), color = "#c2410c") +
+  scale_size_continuous(range = c(1.5, 7)) +
+  labs(
+    title = "Raw ratings vs. reviewer-adjusted scores",
+    subtitle = "Restaurants with 20+ eligible reviews; orange = adjusted top 10",
+    x = "Average stars from all reviewers", y = "Average normalized score", size = "Reviews"
+  )
+ggsave("figures/raw_vs_adjusted.png", width = 8, height = 6, dpi = 150, bg = "white")
+```
+
+### Do the best areas change?
+
+```{r zip-adjusted}
+zip_adjusted <- eligible_reviews |>
+  left_join(by_zcta |> select(business_id, area), by = "business_id") |>
+  filter(!is.na(area)) |>
+  group_by(area) |>
+  summarise(
+    eligible_reviews = n(),
+    avg_normalized = mean(normalized_score),
+    .groups = "drop"
+  ) |>
+  left_join(
+    ranked |>
+      group_by(area) |>
+      summarise(
+        restaurants_20plus = n(),
+        avg_stars_ranked = mean(avg_stars_all),
+        .groups = "drop"
+      ),
+    by = "area"
+  ) |>
+  filter(coalesce(restaurants_20plus, 0L) >= min_established)
+
+zip_adjusted |>
+  mutate(rank_raw = rank(-avg_stars_ranked), rank_adjusted = rank(-avg_normalized)) |>
+  arrange(rank_adjusted) |>
+  transmute(
+    ZIP = area, `Restaurants (20+ eligible)` = restaurants_20plus,
+    `Raw avg stars` = round(avg_stars_ranked, 2),
+    `Adjusted score` = round(avg_normalized, 3),
+    `Raw rank` = rank_raw, `Adjusted rank` = rank_adjusted
+  ) |>
+  knitr::kable(caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews")
+```
+
+```{r final-map, fig.width=9, fig.height=7}
+top10_points <- in_city |> semi_join(top10, by = "business_id")
+
+ggplot() +
+  geom_sf(
+    data = zcta |> inner_join(zip_adjusted, by = "area"),
+    aes(fill = avg_normalized), color = "white", linewidth = 0.3
+  ) +
+  geom_sf(data = zcta |> filter(area %in% zcta_summary$area), fill = NA, color = "grey70", linewidth = 0.2) +
+  geom_sf(data = top10_points, color = "#111827", size = 3) +
+  ggrepel::geom_label_repel(
+    data = top10_points |>
+      mutate(label = str_trunc(business_name, 22)) |>
+      st_drop_geometry(),
+    aes(x = longitude, y = latitude, label = label), size = 2.6, max.overlaps = Inf
+  ) +
+  scale_fill_viridis_c(option = "C", name = "Avg adjusted\nscore") +
+  coord_sf(xlim = focus[c("xmin", "xmax")], ylim = focus[c("ymin", "ymax")]) +
+  labs(
+    title = "Top 10 breakfast and coffee restaurants and the best ZIP areas",
+    subtitle = "Dots = adjusted top 10; shading = average reviewer-adjusted score by ZIP"
+  )
+ggsave("figures/top10_map.png", width = 9, height = 7, dpi = 150, bg = "white")
+```
+
+### Final answer
+
+**Best area: ZIP 70117 (Bywater / Marigny / St. Roch area), narrowly.** It is first on raw stars (4.15) and first after adjustment, so the answer does not depend on reviewer generosity. But the margin is small. 70119 (Mid-City) and 70115 (Uptown) are about 0.01 behind on the adjusted score, so those three ZIPs are close to a tie. The French Quarter and downtown ZIPs (70116, 70112, 70130) have the most restaurants but fall below zero on the adjusted score, meaning their reviewers rate them slightly lower than those same reviewers' usual.
+
+**Top 10 restaurants** (adjusted score, 20+ eligible reviews): Park Island Brew, Angelo Brocato, Coffee Science, Piccola Gelateria, Paladar 511, Sólo Espresso, Welty's Deli and Catering, Dong Phuong, Fatma's Cozy Corner and Two Chicks Café - CBD. Three are in 70119 and two in 70117.
+
+**What the adjustment changed.**
+
+- Overall the two rankings agree (rank correlation `r round(cor(ranked$avg_stars_all, ranked$avg_normalized, method = "spearman"), 2)`), but individual restaurants move a lot. Dong Phuong jumps from raw rank 70 to 8 and Paladar 511 from 26 to 5, because their reviewers usually rate other places lower. Catalino's falls from 3 to 127: its 4.73 raw average comes from reviewers who give nearly everyone high ratings.
+- Some of the largest moves are likely noise rather than reviewer behavior. Several top-10 places have only 24 to 37 eligible reviews, and the 5-review baseline is itself a rough estimate.
+- The top 10 is **not stable** to the threshold. Using 3 or 10 reviews instead of 5 keeps only 5 of the 10 restaurants. The ZIP-level result is steadier than the individual restaurant list, so I trust the area conclusion more than the exact top-10 order.
+
+## Limitations
+
+- Yelp ratings come from self-selected reviewers, so a restaurant's rating reflects who chose to review it, not every diner.
+- The reviewer baseline is based on only a handful of reviews for most reviewers (5 or more), so it is a rough estimate of their habits and includes the review being adjusted.
 - The Yelp dataset is a snapshot, so closed restaurants and changed ratings are not reflected.
-- ZIP areas and tracts are different sizes; neither is an official neighborhood. Neighborhood Statistical Areas and wards from Data.NOLA.gov were not tested.
+- ZIP areas are postal units, not neighborhoods, and tracts are very small. Neighborhood Statistical Areas and wards from Data.NOLA.gov were not tested.
+- Some Yelp coordinates look wrong (for example Le Petit Bistro, which has no street address).
+
+## AI prompts used
+
+_To be added._

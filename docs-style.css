@@ -1,0 +1,10 @@
+body { font-family: "Inter", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2937; }
+.quarto-title-block h1.title, h1.title { font-weight: 800; letter-spacing: -0.02em; color: #7c2d12; }
+h2 { border-bottom: 2px solid #fed7aa; padding-bottom: .25rem; margin-top: 2.5rem; color: #9a3412; }
+h3 { color: #c2410c; margin-top: 1.8rem; }
+table { font-size: .9rem; }
+table caption { caption-side: top; font-weight: 600; color: #7c2d12; }
+thead th { background: #fff7ed; border-bottom: 2px solid #fdba74 !important; }
+blockquote { border-left: 4px solid #ea580c; background: #fff7ed; padding: .8rem 1rem; font-size: 1.1rem; }
+img { max-width: 100%; }
+pre { font-size: .8rem; }
