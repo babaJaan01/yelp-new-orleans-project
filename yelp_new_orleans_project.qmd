@@ -585,4 +585,28 @@ ggsave("figures/top10_map.png", width = 9, height = 7, dpi = 150, bg = "white")
 
 ## AI prompts used
 
-_To be added._
+These are the prompts I used while building Step 7 and writing it up, quoted as I wrote them. Each one maps to a part of the report.
+
+### 1. Building the reviewer-adjusted score (Step 7 code)
+
+> In my New Orleans breakfast/coffee project, I want to rank restaurants by a reviewer-adjusted score, not raw stars. The idea is: for each reviewer with at least 5 reviews, compute their average star rating; then for each review, subtract that reviewer's average from the stars they gave; then average those adjusted values per restaurant, keeping only restaurants with 20+ eligible reviews. Can you write the  pipeline for this and explain what each step does?
+
+Used for: the `reviewer_baselines`, `adjusted_reviews()` and `restaurant_summary` chunks.
+
+### 2. Making sure I understand the code I submit
+
+> I have this chunk in my Quarto file and I want to be able to explain it in my write-up. Can you walk through it line by line and tell me what inner_join and mutate are doing here, and why the inner_join matters for which reviews survive?
+
+Used for: the explanation of how only reviews from eligible reviewers (5+ reviews) are kept.
+
+### 3. Explaining the results in plain language
+
+> I need to explain in plain language what a reviewer-adjusted score of +0.62 means for a restaurant, and why the raw and adjusted rankings mostly agree (rank correlation 0.86) but some restaurants move dramatically. Can you explain the concept and give a concrete example from my results?
+
+Used for: the "What the adjustment changed" discussion (for example Dong Phuong moving from #70 to #8).
+
+### 4. Checking that my conclusions are consistent
+
+> My report says ZIP codes are the right geographic unit and also that the top-10 restaurant ranking isn't very stable. Can you explain how those two claims fit together, why the top-10 changes when I switch the review cutoff from 5 to 3 or 10, and what that means for how I should state my conclusion?
+
+Used for: the final answer, where I state that the area result is steadier than the exact top-10 order.

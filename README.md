@@ -1,10 +1,23 @@
 # Where to Find the Best Breakfast and Coffee in New Orleans
 
-MATH 167R Project 2 · Yelp Open Dataset
+## [Read the final report (PDF)](docs/yelp_new_orleans_project.pdf)
+
+[Download the PDF directly](https://github.com/babaJaan01/yelp-new-orleans-project/raw/refs/heads/main/docs/yelp_new_orleans_project.pdf) · [HTML version (download to view)](docs/yelp_new_orleans_project.html) · [Quarto source with all code](yelp_new_orleans_project.qmd)
 
 **Research question:** Where in New Orleans can someone find the best breakfast and coffee restaurants, and which geographic area is best for finding them?
 
-**Full report:** [PDF](docs/yelp_new_orleans_project.pdf) · [HTML (download to view)](docs/yelp_new_orleans_project.html) · [Quarto source with all code](yelp_new_orleans_project.qmd)
+Shayaan Tanveer · MATH 167R Project 2 · R + Quarto + Yelp Open Dataset
+
+The report is the complete argument: the data, my choices, the spatial analysis, and the reviewer-adjusted ranking. This README is the short version.
+
+| In the report | Section |
+|---|---|
+| Data handling for the 5 GB review file | Large-data management |
+| Category choice and evidence | Step 3 |
+| Official boundary and spatial join | Step 5 |
+| ZIP codes vs. census tracts, and my choice | Step 6 |
+| Reviewer-adjusted scores, top 10, final answer | Step 7 |
+| Limitations and AI prompts | Last two sections |
 
 ## Answer in brief
 
@@ -33,12 +46,17 @@ Ranked by average reviewer-adjusted score among restaurants with 20+ reviews fro
 
 The adjusted score is the review's stars minus that reviewer's own average, so +0.5 means reviewers rated the place half a star above their usual.
 
-## How I got there
+## My decisions and the reasons behind them
 
-1. **Data.** 2,259 New Orleans restaurants and 476,421 reviews from the Yelp Open Dataset (full set, not a sample).
-2. **Categories.** Breakfast & brunch, coffee & tea, cafes and bakeries: 575 restaurants, 564 inside the official city boundary (11 "New Orleans" labels in Yelp are actually suburbs).
-3. **Geography.** ZIP codes vs. census tracts (table below). I chose ZIP codes.
-4. **Reviewer adjustment.** 3,398 reviewers have 5+ reviews and write 19% of the reviews.
+| Decision | Choice | Why | Reservation |
+|---|---|---|---|
+| Theme | Breakfast & brunch, coffee & tea, cafes, bakeries | One occasion (a morning stop); co-occur heavily, e.g. 85 places are both breakfast & coffee. | Includes some bars and delis that also serve breakfast. |
+| City boundary | Inside the official Census boundary: 564 of 575 | 11 Yelp "New Orleans" labels are Jefferson Parish suburbs. | One restaurant has coordinates that look wrong. |
+| Geography | ZIP codes (18 areas) | Enough restaurants per area (median 14) and familiar to readers. | ZIPs are postal units, not neighborhoods. |
+| Reviewer baseline | Mean, reviewers with 5+ reviews | 3,398 reviewers, 19% of reviews; mean is finer than a median on whole stars. | Baselines rest on few reviews. |
+| Ranking | Adjusted score, 20+ eligible reviews | Reduces the effect of generous or harsh reviewers. | Several top-10 places have only 24 to 37 eligible reviews. |
+
+Data: 2,259 New Orleans restaurants and 476,421 reviews (the full set, not a sample).
 
 | Geographic system | Areas | Restaurants assigned | Unmatched | Smallest | Median | Largest | Areas with < 5 |
 |---|--:|--:|--:|--:|--:|--:|--:|
@@ -64,10 +82,15 @@ Yelp reviewers are self-selected, reviewer baselines rest on few reviews, ZIP ar
 
 The raw Yelp files are several GB, so they are not in the repo. The reviews file (`reviews_new_orleans.rds`) is also left out because it contains review text.
 
-1. Download the Yelp Open Dataset: <https://business.yelp.com/data/resources/open-dataset/>.
-2. Extract `yelp_academic_dataset_business.json` and `yelp_academic_dataset_review.json` from `yelp_dataset.tar` into `data/raw/`.
-3. Run `Rscript R/import.R` to create the filtered `.rds` files in `data/new_orleans/`.
-4. Run `quarto render yelp_new_orleans_project.qmd --output-dir docs` (needs `tidyverse`, `sf`, `tigris`, `viridis`, `patchwork`, `ggrepel`, and internet for Census boundaries).
+1. Download the Yelp Open Dataset from <https://business.yelp.com/data/resources/open-dataset/> and extract `yelp_academic_dataset_business.json` and `yelp_academic_dataset_review.json` from `yelp_dataset.tar` into `data/raw/`.
+2. From the repository root, run:
+
+```sh
+Rscript R/import.R
+quarto render yelp_new_orleans_project.qmd --output-dir docs
+```
+
+The import step filters the 5 GB review file in chunks (about 6 minutes). Rendering needs `tidyverse`, `sf`, `tigris`, `viridis`, `patchwork`, `ggrepel` and an internet connection for the Census boundaries.
 
 ## Files
 
@@ -78,6 +101,32 @@ The raw Yelp files are several GB, so they are not in the repo. The reviews file
 - [data/new_orleans/](data/new_orleans/): filtered business data
 - [yelp new orleans project instructions.qmd](<yelp new orleans project instructions.qmd>): the assignment
 
-## AI prompts used
+## AI assistance
 
-_To be added._
+I used AI to help write and check the Step 7 code and to make sure I could explain the results. These are the actual prompts I used (also in the report).
+
+These are the prompts I used while building Step 7 and writing it up, quoted as I wrote them. Each one maps to a part of the report.
+
+#### 1. Building the reviewer-adjusted score (Step 7 code)
+
+> In my New Orleans breakfast/coffee project, I want to rank restaurants by a reviewer-adjusted score, not raw stars. The idea is: for each reviewer with at least 5 reviews, compute their average star rating; then for each review, subtract that reviewer's average from the stars they gave; then average those adjusted values per restaurant, keeping only restaurants with 20+ eligible reviews. Can you write the  pipeline for this and explain what each step does?
+
+Used for: the `reviewer_baselines`, `adjusted_reviews()` and `restaurant_summary` chunks.
+
+#### 2. Making sure I understand the code I submit
+
+> I have this chunk in my Quarto file and I want to be able to explain it in my write-up. Can you walk through it line by line and tell me what inner_join and mutate are doing here, and why the inner_join matters for which reviews survive?
+
+Used for: the explanation of how only reviews from eligible reviewers (5+ reviews) are kept.
+
+#### 3. Explaining the results in plain language
+
+> I need to explain in plain language what a reviewer-adjusted score of +0.62 means for a restaurant, and why the raw and adjusted rankings mostly agree (rank correlation 0.86) but some restaurants move dramatically. Can you explain the concept and give a concrete example from my results?
+
+Used for: the "What the adjustment changed" discussion (for example Dong Phuong moving from #70 to #8).
+
+#### 4. Checking that my conclusions are consistent
+
+> My report says ZIP codes are the right geographic unit and also that the top-10 restaurant ranking isn't very stable. Can you explain how those two claims fit together, why the top-10 changes when I switch the review cutoff from 5 to 3 or 10, and what that means for how I should state my conclusion?
+
+Used for: the final answer, where I state that the area result is steadier than the exact top-10 order.
