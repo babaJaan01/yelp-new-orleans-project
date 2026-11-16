@@ -257,6 +257,8 @@ geo_comparison <- tibble(
 knitr::kable(geo_comparison, caption = "Comparison of geographic systems (restaurants inside New Orleans)")
 ```
 
+**Evidence for the Step 3 requirement (10+ restaurants in 7+ areas):** the `r nrow(in_city)` selected restaurants fall in `r nrow(zcta_summary)` different ZIP areas, and `r sum(zcta_summary$restaurants >= 10)` of those ZIP areas have 10 or more of them. The requirement is met under ZIP codes (and under census tracts, which use `r nrow(tract_summary)` areas).
+
 ```{r geo-maps, fig.width=11, fig.height=6}
 # zoom to where the restaurants are; the official city boundary includes miles of marsh and water
 focus <- st_bbox(in_city) + c(-0.01, -0.01, 0.01, 0.01)
