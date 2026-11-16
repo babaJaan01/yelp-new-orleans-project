@@ -7,7 +7,7 @@ format:
     papersize: us-letter
     margin:
       x: 0.7in
-      y: 0.7in
+      y: 0.55in
     fontsize: 10.5pt
     mainfont: "Helvetica Neue"
     number-sections: false
@@ -38,14 +38,14 @@ k <- read.csv("results/key_numbers.csv")
 > **Where in New Orleans can someone find the best breakfast and coffee restaurants, and which geographic area is best for finding them?**
 
 ```{=typst}
-#result-card([Best area for quality], [ZIP 70117])
+#result-card([Best area for quality (narrowly)], [ZIP 70117])
 #result-card([Best area for variety], [ZIP 70130])
 #result-card([Top-rated restaurant], [Park Island Brew])
 ```
 
 ## The short answer
 
-**ZIP 70117** (Bywater / Marigny / St. Roch) is the best area for finding breakfast and coffee. It ranks first on raw Yelp stars *and* after adjusting for each reviewer's scoring habits. The margin is small: Mid-City (70119) and Uptown (70115) are about 0.01 behind on the adjusted score. The downtown ZIP **70130** has by far the most choices but a lower average rating.
+**ZIP 70117** (Bywater / Marigny / St. Roch) is first for breakfast and coffee at my chosen settings, on raw Yelp stars *and* after adjusting for each reviewer's scoring habits. But Mid-City (70119) and Uptown (70115) are about 0.01 behind, and the order changes with the reviewer cutoff, so the safest conclusion is that these three ZIPs are the best areas. The downtown ZIP **70130** has by far the most choices but a lower average rating.
 
 ![Adjusted top 10 restaurants (dots) and average reviewer-adjusted score by ZIP (shading).](figures/top10_map.png){width=62%}
 
@@ -82,7 +82,7 @@ Only `r format(k$eligible_reviewers, big.mark = ",")` reviewers have 5+ reviews,
 - **Dong Phuong** rises from #70 to #8 and **Paladar 511** from #26 to #5, because their reviewers usually rate other places lower.
 - **Catalino's** falls from #3 to #127: its 4.73 raw average came from reviewers who give nearly everyone high ratings.
 
-![Raw average stars vs. reviewer-adjusted score; orange dots are the adjusted top 10.](figures/raw_vs_adjusted.png){width=78%}
+![Raw average stars vs. reviewer-adjusted score; orange dots are the adjusted top 10.](figures/raw_vs_adjusted.png){width=62%}
 
 ```{r}
 tbl(zip, caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews")
@@ -94,12 +94,12 @@ tbl(zip, caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews
 tbl(thr, caption = "Changing the minimum number of reviews per reviewer")
 ```
 
-The exact top 10 is **not stable**: a 3- or 10-review cutoff keeps only 5 of the 10 restaurants. The ZIP-level result is steadier than the restaurant order, so I trust the area conclusion more than the exact list.
+The exact top 10 is **not stable**: a 3- or 10-review cutoff keeps only 5 of the 10 restaurants, so treat it as strong contenders. The ZIP order also shifts (70117 is 1st at 5 reviews, 2nd at 10 and 3rd at 3), but 70117, 70115 and 70119 stay near the top (top 3 at 5 and 10 reviews, top 4 at 3).
 
 ## Limitations
 
 - Yelp reviewers are self-selected, so ratings reflect who chose to review, not every diner.
-- Reviewer baselines rest on few reviews and include the review being adjusted.
+- Reviewer baselines rest on few reviews, include the review being adjusted, and come only from these New Orleans breakfast and coffee restaurants, not all of Yelp.
 - Several top-10 restaurants have only 24 to 37 eligible reviews.
 - ZIP areas are postal units; Neighborhood Statistical Areas and wards were not tested.
 - The data is a snapshot, and some Yelp coordinates look wrong.
@@ -112,16 +112,24 @@ I used AI to help write and check the Step 7 code and to make sure I could expla
 
 > In my New Orleans breakfast/coffee project, I want to rank restaurants by a reviewer-adjusted score, not raw stars. The idea is: for each reviewer with at least 5 reviews, compute their average star rating; then for each review, subtract that reviewer's average from the stars they gave; then average those adjusted values per restaurant, keeping only restaurants with 20+ eligible reviews. Can you write the  pipeline for this and explain what each step does?
 
+*Follow-up:* I asked to make the cutoffs arguments so I could rerun at 3 and 10. The reviewer cutoff is now a function argument; the restaurant cutoff (20) is one variable. I also kept the all-reviewer raw average separate from the eligible-reviewer average.
+
 **2. Understanding the code I submit**
 
 > I have this chunk in my Quarto file and I want to be able to explain it in my write-up. Can you walk through it line by line and tell me what inner_join and mutate are doing here, and why the inner_join matters for which reviews survive?
+
+*Follow-up:* I asked whether the baseline is only from New Orleans reviews. It is narrower: only these breakfast and coffee restaurants. I added that to the limitations.
 
 **3. Explaining the results**
 
 > I need to explain in plain language what a reviewer-adjusted score of +0.62 means for a restaurant, and why the raw and adjusted rankings mostly agree (rank correlation 0.86) but some restaurants move dramatically. Can you explain the concept and give a concrete example from my results?
 
+*Follow-up:* I asked if I could add +0.62 to the raw 4.85. No: the adjusted score is relative to each reviewer's own baseline, not on the stars scale, so I reworded it as "about 0.62 stars above their usual".
+
 **4. Checking my conclusions are consistent**
 
 > My report says ZIP codes are the right geographic unit and also that the top-10 restaurant ranking isn't very stable. Can you explain how those two claims fit together, why the top-10 changes when I switch the review cutoff from 5 to 3 or 10, and what that means for how I should state my conclusion?
+
+*Follow-up:* I asked whether the ZIP ranking also changes. I had only tested the restaurants, so I ran it: the ZIP order shifts too, though 70117, 70115 and 70119 stay on top. I now state the area result as a group of three.
 
 Code, data-handling details and the full analysis: [github.com/babaJaan01/yelp-new-orleans-project](https://github.com/babaJaan01/yelp-new-orleans-project).

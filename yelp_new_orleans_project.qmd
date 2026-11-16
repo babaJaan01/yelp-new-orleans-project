@@ -542,6 +542,35 @@ zip_table <- zip_adjusted |>
 knitr::kable(zip_table, caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews")
 ```
 
+```{r zip-threshold}
+# Does the ZIP-level ranking survive a different reviewer cutoff?
+zip_rank_at <- function(min_reviews) {
+  r <- adjusted_reviews(min_reviews)
+  eligible_restaurants <- r |> count(business_id) |> filter(n >= min_eligible)
+  r |>
+    left_join(by_zcta |> select(business_id, area), by = "business_id") |>
+    filter(!is.na(area)) |>
+    group_by(area) |>
+    summarise(avg_normalized = mean(normalized_score), .groups = "drop") |>
+    left_join(
+      eligible_restaurants |>
+        left_join(by_zcta |> select(business_id, area), by = "business_id") |>
+        count(area, name = "restaurants_20plus"),
+      by = "area"
+    ) |>
+    filter(coalesce(restaurants_20plus, 0L) >= min_established) |>
+    arrange(desc(avg_normalized)) |>
+    mutate(rank = row_number()) |>
+    select(area, rank)
+}
+
+zip_threshold_table <- map(c(3, 5, 10), \(k) zip_rank_at(k) |> rename_with(\(x) paste0("rank_", k), rank)) |>
+  reduce(full_join, by = "area") |>
+  arrange(rank_5)
+
+knitr::kable(zip_threshold_table, caption = "ZIP rank (by adjusted score) at three reviewer cutoffs; blank = fewer than 5 restaurants with 20+ eligible reviews")
+```
+
 ```{r final-map, fig.width=9, fig.height=7}
 top10_points <- in_city |> semi_join(top10, by = "business_id")
 
@@ -597,7 +626,7 @@ write.csv(
 
 ### Final answer
 
-**Best area: ZIP 70117 (Bywater / Marigny / St. Roch area), narrowly.** It is first on raw stars (4.15) and first after adjustment, so the answer does not depend on reviewer generosity. But the margin is small. 70119 (Mid-City) and 70115 (Uptown) are about 0.01 behind on the adjusted score, so those three ZIPs are close to a tie. The French Quarter and downtown ZIPs (70116, 70112, 70130) have the most restaurants but fall below zero on the adjusted score, meaning their reviewers rate them slightly lower than those same reviewers' usual.
+**Best area: ZIP 70117 (Bywater / Marigny / St. Roch area) at my main settings, but really a group of three.** It is first on raw stars (4.15) and first after adjustment at the 5-review cutoff. But the margin is small: 70119 (Mid-City) and 70115 (Uptown) are about 0.01 behind, and the order changes with the cutoff (70117 is 1st at 5 reviews, 2nd at 10 and 3rd at 3; see the ZIP-rank table above). What does hold is that 70117, 70115 and 70119 are the top three at cutoffs 5 and 10, and among the top four at cutoff 3. So the defensible conclusion is that these three ZIPs are the best areas, with 70117 first under my chosen settings. The French Quarter and downtown ZIPs (70116, 70112, 70130) have the most restaurants but fall below zero on the adjusted score, meaning their reviewers rate them slightly lower than those same reviewers' usual.
 
 **Top 10 restaurants** (adjusted score, 20+ eligible reviews): Park Island Brew, Angelo Brocato, Coffee Science, Piccola Gelateria, Paladar 511, Sólo Espresso, Welty's Deli and Catering, Dong Phuong, Fatma's Cozy Corner and Two Chicks Café - CBD. Three are in 70119 and two in 70117.
 
@@ -605,12 +634,13 @@ write.csv(
 
 - Overall the two rankings agree (rank correlation `r round(cor(ranked$avg_stars_all, ranked$avg_normalized, method = "spearman"), 2)`), but individual restaurants move a lot. Dong Phuong jumps from raw rank 70 to 8 and Paladar 511 from 26 to 5, because their reviewers usually rate other places lower. Catalino's falls from 3 to 127: its 4.73 raw average comes from reviewers who give nearly everyone high ratings.
 - Some of the largest moves are likely noise rather than reviewer behavior. Several top-10 places have only 24 to 37 eligible reviews, and the 5-review baseline is itself a rough estimate.
-- The top 10 is **not stable** to the threshold. Using 3 or 10 reviews instead of 5 keeps only 5 of the 10 restaurants. The ZIP-level result is steadier than the individual restaurant list, so I trust the area conclusion more than the exact top-10 order.
+- The top 10 is **not stable** to the threshold. Using 3 or 10 reviews instead of 5 keeps only 5 of the 10 restaurants. The ZIP ranking also shifts (see the ZIP-rank table above), but the same three ZIPs stay at the top while the restaurant list changes by half. I therefore state the area result as a group of three ZIPs and treat the top 10 as strong contenders, not a firm ranking.
 
 ## Limitations
 
 - Yelp ratings come from self-selected reviewers, so a restaurant's rating reflects who chose to review it, not every diner.
 - The reviewer baseline is based on only a handful of reviews for most reviewers (5 or more), so it is a rough estimate of their habits and includes the review being adjusted.
+- The baseline is built only from each reviewer's reviews of these New Orleans breakfast and coffee restaurants, not their ratings across all of Yelp. A reviewer who mostly rates in other cities or cuisines gets a baseline from a few local reviews.
 - The Yelp dataset is a snapshot, so closed restaurants and changed ratings are not reflected.
 - ZIP areas are postal units, not neighborhoods, and tracts are very small. Neighborhood Statistical Areas and wards from Data.NOLA.gov were not tested.
 - Some Yelp coordinates look wrong (for example Le Petit Bistro, which has no street address).
@@ -625,11 +655,19 @@ These are the prompts I used while building Step 7 and writing it up, quoted as 
 
 Used for: the `reviewer_baselines`, `adjusted_reviews()` and `restaurant_summary` chunks.
 
+**Follow-up I asked:** "The 5-review thresholds are hard-coded in two places. Can you make both cutoffs function arguments so I can rerun the whole pipeline at 3 and 10 without editing the body?"
+
+**What changed:** The reviewer cutoff is now a function argument (`adjusted_reviews(min_reviews)`, reused by `top10_at()`), so the 3/5/10 comparison is one call each instead of copy-pasting the chunk. The restaurant cutoff (20 eligible reviews) is a single variable, `min_eligible`, set once, rather than a function argument. I also keep the all-reviewer average (`avg_stars_all`) separate from the eligible-reviewer average (`avg_stars_eligible`), so the "Raw avg stars" column is the all-reviewers number and not a quietly different quantity.
+
 ### 2. Making sure I understand the code I submit
 
 > I have this chunk in my Quarto file and I want to be able to explain it in my write-up. Can you walk through it line by line and tell me what inner_join and mutate are doing here, and why the inner_join matters for which reviews survive?
 
 Used for: the explanation of how only reviews from eligible reviewers (5+ reviews) are kept.
+
+**Follow-up I asked:** "My reviewer baseline is computed after I've already filtered the reviews down to New Orleans. So it's each reviewer's average in New Orleans, not their average across all of Yelp. Does that change what the baseline means, and should I say so in the limitations?"
+
+**What changed:** The first explanation covered `inner_join` and `mutate` but did not flag that the baseline (`reviewer_mean`) comes from a filtered review set. In my code it is narrower still: only reviews of the breakfast and coffee restaurants inside the city boundary. I added that to the limitations instead of implying a Yelp-wide baseline.
 
 ### 3. Explaining the results in plain language
 
@@ -637,8 +675,16 @@ Used for: the explanation of how only reviews from eligible reviewers (5+ review
 
 Used for: the "What the adjustment changed" discussion (for example Dong Phuong moving from #70 to #8).
 
+**Follow-up I asked:** "Can I add +0.62 to the raw 4.85 to get an 'effective' rating of about 5.47? Or is the adjusted score on a different scale?"
+
+**What changed:** My first draft called it an "effective rating", which is wrong: the adjusted score is relative to each reviewer's own baseline and is not on the stars scale (4.85 + 0.62 > 5 is the giveaway). The report now says reviewers rated the place about 0.62 stars above their usual, not that it "is" a higher-rated restaurant.
+
 ### 4. Checking that my conclusions are consistent
 
 > My report says ZIP codes are the right geographic unit and also that the top-10 restaurant ranking isn't very stable. Can you explain how those two claims fit together, why the top-10 changes when I switch the review cutoff from 5 to 3 or 10, and what that means for how I should state my conclusion?
 
-Used for: the final answer, where I state that the area result is steadier than the exact top-10 order.
+Used for: the final answer and the stability section.
+
+**Follow-up I asked:** "You said the top-10 isn't stable at cutoffs of 3 and 10. Does the ZIP-level ranking also change, or only the restaurant order? I need to know whether my headline claim survives or just the detail."
+
+**What changed:** I had only tested the restaurant list, so I ran the ZIP ranking at cutoffs 3, 5 and 10 too. It also shifts: 70117 is 1st at 5 reviews, 2nd at 10 and 3rd at 3. What holds is that 70117, 70115 and 70119 stay near the top (top 3 at 5 and 10 reviews, top 4 at 3). I corrected an earlier sentence that called the ZIP result steadier, and now state the finding as a group of three ZIPs, with the top 10 as strong contenders rather than a ranking.
