@@ -1,23 +1,23 @@
 # Where to Find the Best Breakfast and Coffee in New Orleans
 
-## [Read the final report (PDF)](docs/yelp_new_orleans_project.pdf)
+## [Read the final report (5-page PDF)](docs/yelp_new_orleans_project.pdf)
 
-[Download the PDF directly](https://github.com/babaJaan01/yelp-new-orleans-project/raw/refs/heads/main/docs/yelp_new_orleans_project.pdf) · [HTML version (download to view)](docs/yelp_new_orleans_project.html) · [Quarto source with all code](yelp_new_orleans_project.qmd)
+[Download the PDF directly](https://github.com/babaJaan01/yelp-new-orleans-project/raw/refs/heads/main/docs/yelp_new_orleans_project.pdf) · [Full HTML report with all code (download to view)](docs/yelp_new_orleans_project.html) · [Quarto source](yelp_new_orleans_project.qmd)
 
 **Research question:** Where in New Orleans can someone find the best breakfast and coffee restaurants, and which geographic area is best for finding them?
 
 Shayaan Tanveer · MATH 167R Project 2 · R + Quarto + Yelp Open Dataset
 
-The report is the complete argument: the data, my choices, the spatial analysis, and the reviewer-adjusted ranking. This README is the short version.
+The PDF is my summary argument: the answer, my choices and why, the maps and the reviewer-adjusted ranking. The HTML report holds every step with its code, and this README is the quick version.
 
-| In the report | Section |
-|---|---|
-| Data handling for the 5 GB review file | Large-data management |
-| Category choice and evidence | Step 3 |
-| Official boundary and spatial join | Step 5 |
-| ZIP codes vs. census tracts, and my choice | Step 6 |
-| Reviewer-adjusted scores, top 10, final answer | Step 7 |
-| Limitations and AI prompts | Last two sections |
+| In the PDF | Page |
+|---|---:|
+| Answer, top 10 map and top 10 table | 1–2 |
+| How I chose: data, categories, ZIP codes vs. tracts | 2–3 |
+| What the reviewer adjustment changed, stability check | 3–4 |
+| Limitations and AI prompts | 5 |
+
+The full HTML report adds the large-data handling, category counts, the spatial-join checks and all code.
 
 ## Answer in brief
 
@@ -88,6 +88,7 @@ The raw Yelp files are several GB, so they are not in the repo. The reviews file
 ```sh
 Rscript R/import.R
 quarto render yelp_new_orleans_project.qmd --output-dir docs
+quarto render summary.qmd --to typst && mv yelp_new_orleans_project.pdf docs/
 ```
 
 The import step filters the 5 GB review file in chunks (about 6 minutes). Rendering needs `tidyverse`, `sf`, `tigris`, `viridis`, `patchwork`, `ggrepel` and an internet connection for the Census boundaries.
@@ -95,8 +96,10 @@ The import step filters the 5 GB review file in chunks (about 6 minutes). Render
 ## Files
 
 - [R/import.R](R/import.R): imports the raw JSON in chunks, filters to New Orleans, saves RDS files
-- [yelp_new_orleans_project.qmd](yelp_new_orleans_project.qmd): the full analysis and report
-- [docs/](docs/): rendered HTML and PDF report
+- [yelp_new_orleans_project.qmd](yelp_new_orleans_project.qmd): the full analysis and HTML report
+- [summary.qmd](summary.qmd) and [report-style.typ](report-style.typ): the short PDF report (reads tables from `results/`)
+- [results/](results/): tables the analysis saves for the PDF
+- [docs/](docs/): rendered PDF and HTML reports
 - [figures/](figures/): saved maps and plots
 - [data/new_orleans/](data/new_orleans/): filtered business data
 - [yelp new orleans project instructions.qmd](<yelp new orleans project instructions.qmd>): the assignment

@@ -1,0 +1,11 @@
+"rank","restaurant","zip","raw_stars","adjusted","eligible_reviews","raw_rank"
+1,"Park Island Brew","70119",4.85,0.62,24,1
+2,"Angelo Brocato","70119",4.67,0.61,284,9
+3,"Coffee Science","70119",4.7,0.54,37,6
+4,"Piccola Gelateria","70115",4.73,0.51,97,4
+5,"Paladar 511","70117",4.52,0.45,158,26
+6,"Sólo Espresso","70117",4.66,0.43,25,11
+7,"Welty's Deli and Catering","70130",4.67,0.43,95,8
+8,"Dong Phuong","70129",4.33,0.43,156,70
+9,"Fatma's Cozy Corner","70116",4.74,0.42,24,2
+10,"Two Chicks Café - CBD","70112",4.59,0.42,35,19

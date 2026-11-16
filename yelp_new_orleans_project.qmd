@@ -444,7 +444,7 @@ top10_at <- function(min_reviews) {
 
 top10_base <- top10_at(5)
 
-map_dfr(c(3, 5, 10), \(k) {
+threshold_table <- map_dfr(c(3, 5, 10), \(k) {
   r <- adjusted_reviews(k)
   tibble(
     `Minimum reviews per reviewer` = k,
@@ -453,8 +453,9 @@ map_dfr(c(3, 5, 10), \(k) {
     `Restaurants with 20+ eligible reviews` = r |> count(business_id) |> filter(n >= min_eligible) |> nrow(),
     `Top-10 overlap with the 5-review top 10` = length(intersect(top10_at(k), top10_base))
   )
-}) |>
-  knitr::kable(caption = "Changing the reviewer threshold")
+})
+
+knitr::kable(threshold_table, caption = "Changing the reviewer threshold")
 ```
 
 ### Which restaurants move most?
@@ -526,7 +527,7 @@ zip_adjusted <- eligible_reviews |>
   ) |>
   filter(coalesce(restaurants_20plus, 0L) >= min_established)
 
-zip_adjusted |>
+zip_table <- zip_adjusted |>
   mutate(rank_raw = rank(-avg_stars_ranked), rank_adjusted = rank(-avg_normalized)) |>
   arrange(rank_adjusted) |>
   transmute(
@@ -534,8 +535,9 @@ zip_adjusted |>
     `Raw avg stars` = round(avg_stars_ranked, 2),
     `Adjusted score` = round(avg_normalized, 3),
     `Raw rank` = rank_raw, `Adjusted rank` = rank_adjusted
-  ) |>
-  knitr::kable(caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews")
+  )
+
+knitr::kable(zip_table, caption = "ZIP areas with 5+ restaurants that have 20+ eligible reviews")
 ```
 
 ```{r final-map, fig.width=9, fig.height=7}
@@ -561,6 +563,34 @@ ggplot() +
     subtitle = "Dots = adjusted top 10; shading = average reviewer-adjusted score by ZIP"
   )
 ggsave("figures/top10_map.png", width = 9, height = 7, dpi = 150, bg = "white")
+```
+
+```{r save-results}
+# tables reused by summary.qmd (the short PDF report)
+dir.create("results", showWarnings = FALSE)
+write.csv(geo_comparison, "results/geography_comparison.csv", row.names = FALSE)
+write.csv(threshold_table, "results/threshold_table.csv", row.names = FALSE)
+write.csv(zip_table, "results/zip_adjusted.csv", row.names = FALSE)
+write.csv(
+  ranked |>
+    slice_max(avg_normalized, n = 10, with_ties = FALSE) |>
+    transmute(rank = row_number(), restaurant = business_name, zip = area,
+              raw_stars = round(avg_stars_all, 2), adjusted = round(avg_normalized, 2),
+              eligible_reviews = reviews_eligible, raw_rank = rank_raw),
+  "results/top10.csv", row.names = FALSE
+)
+write.csv(
+  tibble(
+    restaurants_in_city = nrow(restaurant_summary),
+    all_reviews = nrow(category_reviews),
+    all_reviewers = nrow(reviewer_baselines),
+    eligible_reviewers = n_distinct(eligible_reviews$user_id),
+    eligible_reviews = nrow(eligible_reviews),
+    ranked_restaurants = nrow(ranked),
+    rank_correlation = cor(ranked$avg_stars_all, ranked$avg_normalized, method = "spearman")
+  ),
+  "results/key_numbers.csv", row.names = FALSE
+)
 ```
 
 ### Final answer
